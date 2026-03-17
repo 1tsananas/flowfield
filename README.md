@@ -4,7 +4,7 @@ Small flowfield generator i made to distract me from learning for my exams. Insp
 
 ![](images/flowfield_5.png)
 
-TODO:
+## TODO
 - color/transparency
 - stroke width aka complete rewrite
 - cli
