@@ -29,6 +29,16 @@ struct Args {
     )]
     blur: f32,
 
+    #[arg(
+        long,
+        default_value = "0, 0, 0, 255",
+        help = "RRBA for transparent png backgrounds"
+    )]
+    bg_color: String,
+
+    #[arg(long, default_value = "255, 255, 255, 255", help = "RRBA")]
+    fg_color: String,
+
     #[arg(long, default_value_t = 2500)]
     particals: u32,
 
@@ -71,6 +81,7 @@ impl Particle {
         height: u32,
         weight: f64,
         line: bool,
+        fg_color: [u8; 4],
     ) -> bool {
         let ang = ang(perlin.get([self.x * noise, self.y * noise]));
         let x = self.x + f64::cos(ang) * weight;
@@ -87,14 +98,14 @@ impl Particle {
                     img,
                     ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
                     ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
-                    Rgba([255, 255, 255, 255]),
+                    Rgba(fg_color),
                     interpolate,
                 );
             } else {
                 img.put_pixel(
                     (cx1 * width as f64) as u32,
                     (cy1 * height as f64) as u32,
-                    Rgba([255, 255, 255, 255]),
+                    Rgba(fg_color),
                 );
             }
             return true;
@@ -112,7 +123,8 @@ fn main() {
     }
 
     let mut img = RgbaImage::new(args.width, args.height);
-    img.pixels_mut().for_each(|p| *p = Rgba([0, 0, 0, 255]));
+    img.pixels_mut()
+        .for_each(|p| *p = Rgba(string_to_rgba(&args.bg_color)));
     let perlin = Perlin::new(args.seed.unwrap());
 
     for _ in 0..args.particals {
@@ -126,6 +138,7 @@ fn main() {
                 args.height,
                 args.step_size,
                 args.line,
+                string_to_rgba(&args.fg_color),
             ) {
                 break;
             }
@@ -198,4 +211,12 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
             prev_y + u2 * dy,
         ));
     }
+}
+
+fn string_to_rgba(color: &String) -> [u8; 4] {
+    let numbers: Vec<u8> = color
+        .split(',')
+        .map(|s| s.trim().parse::<u8>().unwrap_or(255))
+        .collect();
+    return [numbers[0], numbers[1], numbers[2], numbers[3]];
 }
