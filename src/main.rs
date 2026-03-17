@@ -54,7 +54,7 @@ impl Particle {
         &mut self,
         perlin: &Perlin,
         noise: f64,
-        img: &mut RgbImage,
+        img: &mut RgbaImage,
         width: u32,
         height: u32,
         weight: f64,
@@ -73,7 +73,7 @@ impl Particle {
                 img,
                 ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
                 ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
-                Rgb([255, 255, 255]),
+                Rgba([255, 255, 255, 255]),
                 interpolate,
             );
             return true;
@@ -88,7 +88,7 @@ impl Particle {
                     (self.x * width as f64) as i32,
                     (self.y * height as f64) as i32,
                 ),
-                Rgb([255, 255, 255]),
+                Rgba([255, 255, 255, 255]),
                 interpolate,
             );
             return false;
@@ -103,7 +103,7 @@ fn main() {
     //args.seed = Some(random::<u32>());
     //}
 
-    let mut img = RgbImage::new(args.width, args.height);
+    let mut img = RgbaImage::new(args.width, args.height);
     //let perlin = Perlin::new(args.seed.unwrap());
     let perlin = Perlin::new(args.seed);
 
