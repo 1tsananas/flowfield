@@ -14,12 +14,19 @@ struct Args {
     height: u32,
 
     #[arg(long, default_value_t = 0.001)]
-    step: f64,
+    step_size: f64,
 
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 1000)]
+    steps: u32,
+
+    #[arg(long, default_value_t = 1.0, help = "Noise scale (0.0 - 1.0)")]
     noise: f64,
 
-    #[arg(long, default_value_t = 0.02)]
+    #[arg(
+        long,
+        default_value_t = 0.02,
+        help = "Blur radius (the bigger the longer it takes)"
+    )]
     blur: f32,
 
     #[arg(long, default_value_t = 2500)]
@@ -110,14 +117,14 @@ fn main() {
 
     for _ in 0..args.particals {
         let mut particle = Particle::new();
-        for _ in 0..500 {
+        for _ in 0..args.steps {
             if !particle.step(
                 &perlin,
                 args.noise,
                 &mut img,
                 args.width,
                 args.height,
-                args.step,
+                args.step_size,
                 args.line,
             ) {
                 break;
