@@ -192,5 +192,3 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
         ));
     }
 }
-
-//Git test
