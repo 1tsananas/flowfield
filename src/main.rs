@@ -7,13 +7,13 @@ use std::f64::consts::PI;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value_t = 2048)]
+    #[arg(long, default_value_t = 4096)]
     width: u32,
 
     #[arg(long, default_value_t = 2048)]
     height: u32,
 
-    #[arg(long, default_value_t = 0.005)]
+    #[arg(long, default_value_t = 0.001)]
     step: f64,
 
     #[arg(long, default_value_t = 1.0)]
@@ -22,15 +22,17 @@ struct Args {
     #[arg(long, default_value_t = 0.02)]
     blur: f32,
 
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = 2500)]
     particals: u32,
+
+    #[arg(long, default_value_t = false)]
+    line: bool,
 
     #[arg(short, long, default_value = "flowfield.png")]
     output: String,
 
-    #[arg(short, long, default_value_t = 1)]
-    seed: u32,
-    //seed: Option<u32>,
+    #[arg(short, long)]
+    seed: Option<u32>,
 }
 
 struct Particle {
@@ -61,6 +63,7 @@ impl Particle {
         width: u32,
         height: u32,
         weight: f64,
+        line: bool,
     ) -> bool {
         let ang = ang(perlin.get([self.x * noise, self.y * noise]));
         let x = self.x + f64::cos(ang) * weight;
@@ -72,13 +75,21 @@ impl Particle {
         self.y = y;
 
         if let Some((cx1, cy1, cx2, cy2)) = clipper(self.prev_x, self.prev_y, self.x, self.y) {
-            draw_antialiased_line_segment_mut(
-                img,
-                ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
-                ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
-                Rgba([255, 255, 255, 255]),
-                interpolate,
-            );
+            if line {
+                draw_antialiased_line_segment_mut(
+                    img,
+                    ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
+                    ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
+                    Rgba([255, 255, 255, 255]),
+                    interpolate,
+                );
+            } else {
+                img.put_pixel(
+                    (cx1 * width as f64) as u32,
+                    (cy1 * height as f64) as u32,
+                    Rgba([255, 255, 255, 255]),
+                );
+            }
             return true;
         } else {
             return false;
@@ -89,14 +100,13 @@ impl Particle {
 fn main() {
     let mut args = Args::parse();
 
-    //if args.seed == None {
-    //args.seed = Some(random::<u32>());
-    //}
+    if args.seed == None {
+        args.seed = Some(random::<u32>());
+    }
 
     let mut img = RgbaImage::new(args.width, args.height);
     img.pixels_mut().for_each(|p| *p = Rgba([0, 0, 0, 255]));
-    //let perlin = Perlin::new(args.seed.unwrap());
-    let perlin = Perlin::new(args.seed);
+    let perlin = Perlin::new(args.seed.unwrap());
 
     for _ in 0..args.particals {
         let mut particle = Particle::new();
@@ -108,6 +118,7 @@ fn main() {
                 args.width,
                 args.height,
                 args.step,
+                args.line,
             ) {
                 break;
             }
@@ -144,7 +155,7 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     }
 
     let mut u1 = 0.0;
-    let mut u2 = 1.0;
+    let mut u2 = 0.9999;
 
     if p1 < 0.0 {
         u1 = f64::max(q1 / p1, 0.0);
