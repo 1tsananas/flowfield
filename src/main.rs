@@ -19,6 +19,9 @@ struct Args {
     #[arg(long, default_value_t = 1.0)]
     noise: f64,
 
+    #[arg(long, default_value_t = 0.02)]
+    blur: f32,
+
     #[arg(long, default_value_t = 5000)]
     particals: u32,
 
@@ -78,19 +81,6 @@ impl Particle {
             );
             return true;
         } else {
-            draw_antialiased_line_segment_mut(
-                img,
-                (
-                    (self.prev_x * width as f64) as i32,
-                    (self.prev_y * height as f64) as i32,
-                ),
-                (
-                    (self.x * width as f64) as i32,
-                    (self.y * height as f64) as i32,
-                ),
-                Rgba([255, 255, 255, 255]),
-                interpolate,
-            );
             return false;
         }
     }
@@ -104,6 +94,7 @@ fn main() {
     //}
 
     let mut img = RgbaImage::new(args.width, args.height);
+    img.pixels_mut().for_each(|p| *p = Rgba([0, 0, 0, 255]));
     //let perlin = Perlin::new(args.seed.unwrap());
     let perlin = Perlin::new(args.seed);
 
@@ -122,6 +113,7 @@ fn main() {
             }
         }
     }
+    image::imageops::blur(&mut img, args.blur);
     let _ = img.save(&args.output);
 }
 
@@ -160,7 +152,7 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
         u2 = f64::min(q1 / p1, 1.0);
     }
 
-    if p1 < 0.0 {
+    if p2 < 0.0 {
         u1 = f64::max(q2 / p2, 0.0);
     } else if p2 > 0.0 {
         u2 = f64::min(q2 / p2, 1.0);
