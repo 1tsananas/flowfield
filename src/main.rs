@@ -10,7 +10,7 @@ struct Args {
     #[arg(long, default_value_t = 4096)]
     width: u32,
 
-    #[arg(long, default_value_t = 2048)]
+    #[arg(long, default_value_t = 4096)]
     height: u32,
 
     #[arg(long, default_value_t = 0.001)]
@@ -19,12 +19,12 @@ struct Args {
     #[arg(long, default_value_t = 1000)]
     steps: u32,
 
-    #[arg(long, default_value_t = 1.0, help = "Noise scale (0.0 - 1.0)")]
+    #[arg(long, default_value_t = 1.0)]
     noise: f64,
 
     #[arg(
         long,
-        default_value_t = 0.02,
+        default_value_t = 0.5,
         help = "Blur radius (the bigger the longer it takes)"
     )]
     blur: f32,
@@ -42,7 +42,7 @@ struct Args {
     #[arg(long, default_value_t = 2500)]
     particles: u32,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = true)]
     line: bool,
 
     #[arg(short, long, default_value = "flowfield.png")]
@@ -80,11 +80,13 @@ impl Particle {
         width: u32,
         height: u32,
         weight: f64,
+        aspect: f64,
         line: bool,
         fg_color: [u8; 4],
     ) -> bool {
-        let ang = ang(perlin.get([self.x * noise, self.y * noise]));
-        let x = self.x + f64::cos(ang) * weight;
+        let ang = ang(perlin.get([self.x * noise * aspect, self.y * noise]));
+
+        let x = self.x + f64::cos(ang) * weight / aspect;
         let y = self.y + f64::sin(ang) * weight;
 
         self.prev_x = self.x;
@@ -97,12 +99,12 @@ impl Particle {
                 draw_antialiased_line_segment_mut(
                     img,
                     (
-                        ((cx1 * width as f64) as i32).min(width as i32 - 1),
-                        ((cy1 * height as f64) as i32).min(height as i32 - 1),
+                        (cx1 * width as f64).round() as i32,
+                        (cy1 * height as f64).round() as i32,
                     ),
                     (
-                        ((cx2 * width as f64) as i32).min(width as i32 - 1),
-                        ((cy2 * height as f64) as i32).min(height as i32 - 1),
+                        (cx2 * width as f64).round() as i32,
+                        (cy2 * height as f64).round() as i32,
                     ),
                     Rgba(fg_color),
                     interpolate,
@@ -114,9 +116,9 @@ impl Particle {
                     Rgba(fg_color),
                 );
             }
-            return true;
+            true
         } else {
-            return false;
+            false
         }
     }
 }
@@ -124,13 +126,17 @@ impl Particle {
 fn main() {
     let mut args = Args::parse();
 
-    if args.seed == None {
+    if args.seed.is_none() {
         args.seed = Some(random::<u32>());
     }
 
+    let bg_color = string_to_rgba(&args.bg_color);
+    let fg_color = string_to_rgba(&args.fg_color);
+
+    let aspect = args.width as f64 / args.height as f64;
+
     let mut img = RgbaImage::new(args.width, args.height);
-    img.pixels_mut()
-        .for_each(|p| *p = Rgba(string_to_rgba(&args.bg_color)));
+    img.pixels_mut().for_each(|p| *p = Rgba(bg_color));
     let perlin = Perlin::new(args.seed.unwrap());
 
     for _ in 0..args.particles {
@@ -143,8 +149,9 @@ fn main() {
                 args.width,
                 args.height,
                 args.step_size,
+                aspect,
                 args.line,
-                string_to_rgba(&args.fg_color),
+                fg_color,
             ) {
                 break;
             }
@@ -184,25 +191,25 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     let mut u2 = 1.0;
 
     if p1 < 0.0 {
-        u1 = f64::max(q1 / p1, 0.0);
+        u1 = f64::max(u1, q1 / p1);
     } else if p1 > 0.0 {
         u2 = f64::min(u2, q1 / p1);
     }
 
     if p2 < 0.0 {
-        u1 = f64::max(q2 / p2, 0.0);
+        u1 = f64::max(u1, q2 / p2);
     } else if p2 > 0.0 {
         u2 = f64::min(u2, q2 / p2);
     }
 
     if p3 < 0.0 {
-        u1 = f64::max(q3 / p3, 0.0);
+        u1 = f64::max(u1, q3 / p3);
     } else if p3 > 0.0 {
         u2 = f64::min(u2, q3 / p3);
     }
 
     if p4 < 0.0 {
-        u1 = f64::max(q4 / p4, 0.0);
+        u1 = f64::max(u1, q4 / p4);
     } else if p4 > 0.0 {
         u2 = f64::min(u2, q4 / p4);
     }
@@ -219,7 +226,7 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     }
 }
 
-fn string_to_rgba(color: &String) -> [u8; 4] {
+fn string_to_rgba(color: &str) -> [u8; 4] {
     let numbers: Vec<u8> = color
         .split(',')
         .map(|s| s.trim().parse::<u8>().unwrap_or(255))
