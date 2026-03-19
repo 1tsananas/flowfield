@@ -40,7 +40,7 @@ struct Args {
     fg_color: String,
 
     #[arg(long, default_value_t = 2500)]
-    particals: u32,
+    particles: u32,
 
     #[arg(long, default_value_t = false)]
     line: bool,
@@ -96,15 +96,21 @@ impl Particle {
             if line {
                 draw_antialiased_line_segment_mut(
                     img,
-                    ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
-                    ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
+                    (
+                        ((cx1 * width as f64) as i32).min(width as i32 - 1),
+                        ((cy1 * height as f64) as i32).min(height as i32 - 1),
+                    ),
+                    (
+                        ((cx2 * width as f64) as i32).min(width as i32 - 1),
+                        ((cy2 * height as f64) as i32).min(height as i32 - 1),
+                    ),
                     Rgba(fg_color),
                     interpolate,
                 );
             } else {
                 img.put_pixel(
-                    (cx1 * width as f64) as u32,
-                    (cy1 * height as f64) as u32,
+                    ((cx1 * width as f64) as u32).min(width - 1),
+                    ((cy1 * height as f64) as u32).min(height - 1),
                     Rgba(fg_color),
                 );
             }
@@ -127,7 +133,7 @@ fn main() {
         .for_each(|p| *p = Rgba(string_to_rgba(&args.bg_color)));
     let perlin = Perlin::new(args.seed.unwrap());
 
-    for _ in 0..args.particals {
+    for _ in 0..args.particles {
         let mut particle = Particle::new();
         for _ in 0..args.steps {
             if !particle.step(
@@ -144,7 +150,7 @@ fn main() {
             }
         }
     }
-    image::imageops::blur(&mut img, args.blur);
+    let img = image::imageops::blur(&mut img, args.blur);
     let _ = img.save(&args.output);
 }
 
@@ -175,30 +181,30 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     }
 
     let mut u1 = 0.0;
-    let mut u2 = 0.9999;
+    let mut u2 = 1.0;
 
     if p1 < 0.0 {
         u1 = f64::max(q1 / p1, 0.0);
     } else if p1 > 0.0 {
-        u2 = f64::min(q1 / p1, 1.0);
+        u2 = f64::min(u2, q1 / p1);
     }
 
     if p2 < 0.0 {
         u1 = f64::max(q2 / p2, 0.0);
     } else if p2 > 0.0 {
-        u2 = f64::min(q2 / p2, 1.0);
+        u2 = f64::min(u2, q2 / p2);
     }
 
     if p3 < 0.0 {
         u1 = f64::max(q3 / p3, 0.0);
     } else if p3 > 0.0 {
-        u2 = f64::min(q3 / p3, 1.0);
+        u2 = f64::min(u2, q3 / p3);
     }
 
     if p4 < 0.0 {
         u1 = f64::max(q4 / p4, 0.0);
     } else if p4 > 0.0 {
-        u2 = f64::min(q4 / p4, 1.0);
+        u2 = f64::min(u2, q4 / p4);
     }
 
     if u1 > u2 {
@@ -220,3 +226,7 @@ fn string_to_rgba(color: &String) -> [u8; 4] {
         .collect();
     return [numbers[0], numbers[1], numbers[2], numbers[3]];
 }
+
+//gradient paths
+//gradient background (perlin noise background)
+//fehlerbehandlung und ordentliches speicher und so mit path
