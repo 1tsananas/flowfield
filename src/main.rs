@@ -121,6 +121,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     let path = Path::new(&args.output);
+    let path = if path.extension().is_none() {
+        path.join("flowfield.png")
+    } else {
+        path.to_path_buf()
+    };
     if let Some(parent) = path.parent() {
         if !parent.exists() && parent != Path::new("") {
             println!("Directory {:?} does not exist. Create it? (y/n)", path);
@@ -182,7 +187,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     .to_image();
     let img = image::imageops::blur(&img, args.blur);
 
-    let free_path = find_free_path(path);
+    let free_path = find_free_path(&path);
 
     img.save(&free_path)?;
 
