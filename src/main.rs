@@ -6,7 +6,7 @@ use imageproc::{
 };
 use noise::*;
 use rand::*;
-use std::{error::Error, f64::consts::PI};
+use std::{error::Error, f64::consts::PI, fs::create_dir_all, io::stdin, path::*};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -106,12 +106,6 @@ impl Particle {
                     fg_color,
                     interpolate,
                 );
-                draw_filled_circle_mut(
-                    img,
-                    ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
-                    0,
-                    fg_color,
-                );
             } else {
                 img.put_pixel(
                     (cx1 * width as f64) as u32,
@@ -128,6 +122,25 @@ impl Particle {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+
+    let path = Path::new(&args.output);
+    if let Some(parent) = path.parent() {
+        if !parent.exists() && parent != Path::new("") {
+            println!("Directory {:?} does not exist. Create it? (y/n)", path);
+            loop {
+                let mut input = String::new();
+                stdin().read_line(&mut input)?;
+                match input.trim().to_lowercase().as_str() {
+                    "y" => {
+                        create_dir_all(parent)?;
+                        break;
+                    }
+                    "n" => return Err("Directory does not exist".into()),
+                    _ => println!("Please enter (y/n)"),
+                }
+            }
+        }
+    }
 
     let seed = args.seed.unwrap_or_else(|| random::<u32>());
 
@@ -161,6 +174,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+
     let img = image::imageops::crop_imm(
         &mut img,
         (render_width - args.width) / 2,
@@ -170,7 +184,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     )
     .to_image();
     let img = image::imageops::blur(&img, args.blur);
-    img.save(&args.output)?;
+
+    let free_path = find_free_path(path);
+
+    img.save(&free_path)?;
+
+    println!("seed: {}, saved as {}", seed, free_path.to_string_lossy());
+
     Ok(())
 }
 
@@ -261,5 +281,23 @@ fn positive(number: &str) -> Result<f32, String> {
         Ok(v)
     } else {
         Err("Must be greater than 0".to_string())
+    }
+}
+
+fn find_free_path(path: &Path) -> PathBuf {
+    let mut i = 0;
+    let mut possible_path = path.to_path_buf();
+    loop {
+        if !Path::new(&possible_path).exists() {
+            return possible_path;
+        } else {
+            possible_path = path.with_file_name(format!(
+                "{}_{}.{}",
+                path.file_stem().unwrap_or_default().to_string_lossy(),
+                i,
+                path.extension().unwrap_or_default().to_string_lossy()
+            ));
+            i += 1;
+        }
     }
 }
