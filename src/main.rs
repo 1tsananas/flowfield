@@ -42,7 +42,7 @@ struct Args {
     #[arg(long, default_value_t = 5000, value_parser = value_parser!(u32).range(1..))]
     particles: u32,
 
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     line: bool,
 
     #[arg(short, long, default_value = "flowfield.png")]
