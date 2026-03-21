@@ -1,45 +1,48 @@
 use clap::*;
 use image::*;
-use imageproc::{drawing::draw_antialiased_line_segment_mut, pixelops::interpolate};
+use imageproc::{
+    drawing::{draw_antialiased_line_segment_mut, draw_filled_circle_mut},
+    pixelops::interpolate,
+};
 use noise::*;
 use rand::*;
 use std::f64::consts::PI;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value_t = 4096)]
+    #[arg(long, default_value_t = 2080)]
     width: u32,
 
-    #[arg(long, default_value_t = 4096)]
+    #[arg(long, default_value_t = 2080)]
     height: u32,
 
-    #[arg(long, default_value_t = 0.001)]
+    #[arg(long, default_value_t = 0.01)]
     step_size: f64,
 
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = 100)]
     steps: u32,
 
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 2.0)]
     noise: f64,
 
-    #[arg(
-        long,
-        default_value_t = 0.5,
-        help = "Blur radius (the bigger the longer it takes)"
-    )]
+    #[arg(long, default_value_t = 1.0)]
     blur: f32,
 
     #[arg(
         long,
         default_value = "0, 0, 0, 255",
-        help = "RRBA for transparent png backgrounds"
+        help = "RRBA: \"0-255, 0-255, 0-255, 0-255\" (actual transparent backgrounds possibel)"
     )]
     bg_color: String,
 
-    #[arg(long, default_value = "255, 255, 255, 255", help = "RRBA")]
+    #[arg(
+        long,
+        default_value = "255, 255, 255, 255",
+        help = "RRBA: \"0-255, 0-255, 0-255, 0-255\""
+    )]
     fg_color: String,
 
-    #[arg(long, default_value_t = 2500)]
+    #[arg(long, default_value_t = 5000)]
     particles: u32,
 
     #[arg(long, default_value_t = true)]
@@ -82,7 +85,7 @@ impl Particle {
         weight: f64,
         aspect: f64,
         line: bool,
-        fg_color: [u8; 4],
+        fg_color: Rgba<u8>,
     ) -> bool {
         let ang = ang(perlin.get([self.x * noise * aspect, self.y * noise]));
 
@@ -98,22 +101,22 @@ impl Particle {
             if line {
                 draw_antialiased_line_segment_mut(
                     img,
-                    (
-                        (cx1 * width as f64).round() as i32,
-                        (cy1 * height as f64).round() as i32,
-                    ),
-                    (
-                        (cx2 * width as f64).round() as i32,
-                        (cy2 * height as f64).round() as i32,
-                    ),
-                    Rgba(fg_color),
+                    ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
+                    ((cx2 * width as f64) as i32, (cy2 * height as f64) as i32),
+                    fg_color,
                     interpolate,
+                );
+                draw_filled_circle_mut(
+                    img,
+                    ((cx1 * width as f64) as i32, (cy1 * height as f64) as i32),
+                    0,
+                    fg_color,
                 );
             } else {
                 img.put_pixel(
-                    ((cx1 * width as f64) as u32).min(width - 1),
-                    ((cy1 * height as f64) as u32).min(height - 1),
-                    Rgba(fg_color),
+                    (cx1 * width as f64) as u32,
+                    (cy1 * height as f64) as u32,
+                    fg_color,
                 );
             }
             true
@@ -133,10 +136,13 @@ fn main() {
     let bg_color = string_to_rgba(&args.bg_color);
     let fg_color = string_to_rgba(&args.fg_color);
 
-    let aspect = args.width as f64 / args.height as f64;
+    let render_width = (args.width as f64 * 1.25) as u32;
+    let render_height = (args.height as f64 * 1.25) as u32;
 
-    let mut img = RgbaImage::new(args.width, args.height);
-    img.pixels_mut().for_each(|p| *p = Rgba(bg_color));
+    let aspect = render_width as f64 / render_height as f64;
+
+    let mut img = RgbaImage::new(render_width, render_height);
+    img.pixels_mut().for_each(|p| *p = bg_color);
     let perlin = Perlin::new(args.seed.unwrap());
 
     for _ in 0..args.particles {
@@ -146,8 +152,8 @@ fn main() {
                 &perlin,
                 args.noise,
                 &mut img,
-                args.width,
-                args.height,
+                render_width,
+                render_height,
                 args.step_size,
                 aspect,
                 args.line,
@@ -157,7 +163,15 @@ fn main() {
             }
         }
     }
-    let img = image::imageops::blur(&mut img, args.blur);
+    let img = image::imageops::crop_imm(
+        &mut img,
+        (render_width - args.width) / 2,
+        (render_height - args.height) / 2,
+        args.width,
+        args.height,
+    )
+    .to_image();
+    let img = image::imageops::blur(&img, args.blur);
     let _ = img.save(&args.output);
 }
 
@@ -226,12 +240,12 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     }
 }
 
-fn string_to_rgba(color: &str) -> [u8; 4] {
+fn string_to_rgba(color: &str) -> Rgba<u8> {
     let numbers: Vec<u8> = color
         .split(',')
         .map(|s| s.trim().parse::<u8>().unwrap_or(255))
         .collect();
-    return [numbers[0], numbers[1], numbers[2], numbers[3]];
+    Rgba([numbers[0], numbers[1], numbers[2], numbers[3]])
 }
 
 //gradient paths
