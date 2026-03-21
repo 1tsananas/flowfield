@@ -1,9 +1,6 @@
 use clap::*;
 use image::*;
-use imageproc::{
-    drawing::{draw_antialiased_line_segment_mut, draw_filled_circle_mut},
-    pixelops::interpolate,
-};
+use imageproc::{drawing::draw_antialiased_line_segment_mut, pixelops::interpolate};
 use noise::*;
 use rand::*;
 use std::{error::Error, f64::consts::PI, fs::create_dir_all, io::stdin, path::*};
