@@ -6,26 +6,26 @@ use imageproc::{
 };
 use noise::*;
 use rand::*;
-use std::f64::consts::PI;
+use std::{error::Error, f64::consts::PI};
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value_t = 2080)]
+    #[arg(long, default_value_t = 2080, value_parser = value_parser!(u32).range(1..))]
     width: u32,
 
-    #[arg(long, default_value_t = 2080)]
+    #[arg(long, default_value_t = 2080, value_parser = value_parser!(u32).range(1..))]
     height: u32,
 
     #[arg(long, default_value_t = 0.01)]
     step_size: f64,
 
-    #[arg(long, default_value_t = 100)]
+    #[arg(long, default_value_t = 100, value_parser = value_parser!(u32).range(1..))]
     steps: u32,
 
-    #[arg(long, default_value_t = 2.0)]
+    #[arg(long, default_value_t = 1.0)]
     noise: f64,
 
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 1.0, value_parser = positive)]
     blur: f32,
 
     #[arg(
@@ -42,7 +42,7 @@ struct Args {
     )]
     fg_color: String,
 
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = 5000, value_parser = value_parser!(u32).range(1..))]
     particles: u32,
 
     #[arg(long, default_value_t = true)]
@@ -126,15 +126,13 @@ impl Particle {
     }
 }
 
-fn main() {
-    let mut args = Args::parse();
+fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
 
-    if args.seed.is_none() {
-        args.seed = Some(random::<u32>());
-    }
+    let seed = args.seed.unwrap_or_else(|| random::<u32>());
 
-    let bg_color = string_to_rgba(&args.bg_color);
-    let fg_color = string_to_rgba(&args.fg_color);
+    let bg_color = string_to_rgba(&args.bg_color)?;
+    let fg_color = string_to_rgba(&args.fg_color)?;
 
     let render_width = (args.width as f64 * 1.25) as u32;
     let render_height = (args.height as f64 * 1.25) as u32;
@@ -143,7 +141,7 @@ fn main() {
 
     let mut img = RgbaImage::new(render_width, render_height);
     img.pixels_mut().for_each(|p| *p = bg_color);
-    let perlin = Perlin::new(args.seed.unwrap());
+    let perlin = Perlin::new(seed);
 
     for _ in 0..args.particles {
         let mut particle = Particle::new();
@@ -172,11 +170,12 @@ fn main() {
     )
     .to_image();
     let img = image::imageops::blur(&img, args.blur);
-    let _ = img.save(&args.output);
+    img.save(&args.output)?;
+    Ok(())
 }
 
 fn ang(val: f64) -> f64 {
-    return (val + 1.0) * PI;
+    (val + 1.0) * PI
 }
 
 fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f64)> {
@@ -229,25 +228,38 @@ fn clipper(prev_x: f64, prev_y: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f
     }
 
     if u1 > u2 {
-        return None;
+        None
     } else {
-        return Some((
+        Some((
             prev_x + u1 * dx,
             prev_y + u1 * dy,
             prev_x + u2 * dx,
             prev_y + u2 * dy,
-        ));
+        ))
     }
 }
 
-fn string_to_rgba(color: &str) -> Rgba<u8> {
+fn string_to_rgba(color: &str) -> Result<Rgba<u8>, String> {
     let numbers: Vec<u8> = color
         .split(',')
-        .map(|s| s.trim().parse::<u8>().unwrap_or(255))
-        .collect();
-    Rgba([numbers[0], numbers[1], numbers[2], numbers[3]])
+        .map(|s| {
+            s.trim()
+                .parse::<u8>()
+                .map_err(|_| "Value must be in Range of 0 - 255".to_string())
+        })
+        .collect::<Result<Vec<u8>, String>>()?;
+    if numbers.len() == 4 {
+        Ok(Rgba([numbers[0], numbers[1], numbers[2], numbers[3]]))
+    } else {
+        Err("Color needs exactly 4 Values: R, G, B, A".to_string())
+    }
 }
 
-//gradient paths
-//gradient background (perlin noise background)
-//fehlerbehandlung und ordentliches speicher und so mit path
+fn positive(number: &str) -> Result<f32, String> {
+    let v: f32 = number.parse().map_err(|_| "Must be a number".to_string())?;
+    if v > 0.0 {
+        Ok(v)
+    } else {
+        Err("Must be greater than 0".to_string())
+    }
+}
