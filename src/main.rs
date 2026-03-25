@@ -1,9 +1,12 @@
 use clap::*;
 use image::*;
 use imageproc::{drawing::draw_antialiased_line_segment_mut, pixelops::interpolate};
+use ndarray::Array3;
 use noise::*;
 use rand::*;
 use std::{error::Error, f64::consts::PI, fs::create_dir_all, io::stdin, path::*};
+use video_rs::encode::{Encoder, Settings};
+use video_rs::time::Time;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -42,8 +45,11 @@ struct Args {
     #[arg(long, default_value_t = 5000, value_parser = value_parser!(u32).range(1..))]
     particles: u32,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = true)]
     line: bool,
+
+    #[arg(long, default_value_t = true)]
+    video: bool,
 
     #[arg(short, long, default_value = "flowfield.png")]
     output: String,
@@ -118,6 +124,8 @@ impl Particle {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let frames = 300;
+
     let args = Args::parse();
 
     let path = Path::new(&args.output);
@@ -126,6 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         path.to_path_buf()
     };
+
     if let Some(parent) = path.parent() {
         if !parent.exists() && parent != Path::new("") {
             println!("Directory {:?} does not exist. Create it? (y/n)", path);
@@ -144,6 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let free_path = find_free_path(&path);
     let seed = args.seed.unwrap_or_else(|| random::<u32>());
 
     let bg_color = string_to_rgba(&args.bg_color)?;
@@ -154,43 +164,90 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let aspect = render_width as f64 / render_height as f64;
 
-    let mut img = RgbaImage::new(render_width, render_height);
-    img.pixels_mut().for_each(|p| *p = bg_color);
-    let perlin = Perlin::new(seed);
+    if args.video {
+        video_rs::init().unwrap();
+        let mut img = RgbaImage::new(render_width, render_height);
+        let perlin = Perlin::new(seed);
+        let mut particles: Vec<Particle> = (0..args.particles).map(|_| Particle::new()).collect();
+        let settings =
+            Settings::preset_h264_yuv420p(args.width as usize, args.height as usize, true);
 
-    for _ in 0..args.particles {
-        let mut particle = Particle::new();
+        let mut encoder = Encoder::new(free_path, settings).expect("Failed to create encoder");
+        let mut position = Time::zero();
+        let duration = Time::from_nth_of_a_second(24);
         for _ in 0..args.steps {
-            if !particle.step(
-                &perlin,
-                args.noise,
-                &mut img,
-                render_width,
-                render_height,
-                args.step_size,
-                aspect,
-                args.line,
-                fg_color,
-            ) {
-                break;
+            for particle in particles.iter_mut() {
+                particle.step(
+                    &perlin,
+                    args.noise,
+                    &mut img,
+                    render_width,
+                    render_height,
+                    args.step_size,
+                    aspect,
+                    args.line,
+                    fg_color,
+                );
             }
+
+            let cropped = image::imageops::crop_imm(
+                &mut img,
+                (render_width - args.width) / 2,
+                (render_height - args.height) / 2,
+                args.width,
+                args.height,
+            )
+            .to_image();
+            let blurred = image::imageops::blur(&cropped, args.blur);
+            let blurred_rgb = DynamicImage::ImageRgba8(blurred).to_rgb8();
+            let frame = Array3::from_shape_fn(
+                (args.height as usize, args.width as usize, 3),
+                |(y, x, c)| blurred_rgb.get_pixel(x as u32, y as u32)[c],
+            );
+            encoder
+                .encode(frame.view(), position)
+                .expect("Failed to encode Frame");
+            position = position.aligned_with(duration).add();
         }
+        encoder.finish()?;
     }
 
-    let img = image::imageops::crop_imm(
-        &mut img,
-        (render_width - args.width) / 2,
-        (render_height - args.height) / 2,
-        args.width,
-        args.height,
-    )
-    .to_image();
-    let img = image::imageops::blur(&img, args.blur);
+    if !args.video {
+        let mut img = RgbaImage::new(render_width, render_height);
+        img.pixels_mut().for_each(|p| *p = bg_color);
+        let perlin = Perlin::new(seed);
 
-    let free_path = find_free_path(&path);
+        for _ in 0..args.particles {
+            let mut particle = Particle::new();
+            for _ in 0..args.steps {
+                if !particle.step(
+                    &perlin,
+                    args.noise,
+                    &mut img,
+                    render_width,
+                    render_height,
+                    args.step_size,
+                    aspect,
+                    args.line,
+                    fg_color,
+                ) {
+                    break;
+                }
+            }
+        }
 
-    img.save(&free_path)?;
+        let img = image::imageops::crop_imm(
+            &mut img,
+            (render_width - args.width) / 2,
+            (render_height - args.height) / 2,
+            args.width,
+            args.height,
+        )
+        .to_image();
+        let img = image::imageops::blur(&img, args.blur);
 
+        img.save(&free_path)?;
+    }
     println!("seed: {}, saved as {}", seed, free_path.to_string_lossy());
 
     Ok(())
@@ -303,3 +360,6 @@ fn find_free_path(path: &Path) -> PathBuf {
         }
     }
 }
+
+// 1. Encoder
+// 2. Frame Rendern
