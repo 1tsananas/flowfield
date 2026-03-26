@@ -554,7 +554,7 @@ dependencies = [
  "clap",
  "image",
  "imageproc",
- "ndarray 0.16.1",
+ "ndarray",
  "noise",
  "rand 0.10.0",
  "video-rs",
@@ -1139,21 +1139,6 @@ dependencies = [
  "num-traits",
  "simba",
  "typenum",
-]
-
-[[package]]
-name = "ndarray"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
-dependencies = [
- "matrixmultiply",
- "num-complex",
- "num-integer",
- "num-traits",
- "portable-atomic",
- "portable-atomic-util",
- "rawpointer",
 ]
 
 [[package]]
@@ -2013,7 +1998,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2633ec4c2a8aeb7c0e970f75ba99122a75841e9f7b34d5225366d0e61a870a8c"
 dependencies = [
  "ffmpeg-next",
- "ndarray 0.17.2",
+ "ndarray",
  "tracing",
  "url",
 ]

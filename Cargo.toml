@@ -7,7 +7,7 @@ edition = "2024"
 clap = { version = "4.6.0", features = ["derive"] }
 image = "0.25.10"
 noise = "0.9.0"
-rand =  "0.10.0"
+rand = "0.10.0"
 imageproc = "0.26.1"
 video-rs = { version = "0.11.0", features = ["ndarray"] }
-ndarray = "0.16"
+ndarray = "0.17.2"
