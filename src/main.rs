@@ -1,12 +1,10 @@
 use clap::*;
+use ffmpeg_next::{self as ffmpeg};
 use image::{Rgba, RgbaImage};
 use imageproc::{drawing::draw_antialiased_line_segment_mut, pixelops::interpolate};
-use ndarray::Array3;
 use noise::*;
 use rand::*;
 use std::{error::Error, f64::consts::PI, fs::create_dir_all, io::stdin, path::*};
-use video_rs::encode::{Encoder, Settings};
-use video_rs::time::Time;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -70,15 +68,25 @@ impl Particle {
     }
 
     fn step(&mut self, perlin: &Perlin, img: &mut RgbaImage, cfg: &RenderConfig) -> bool {
-        let angle = (perlin.get([self.x * cfg.noise * cfg.aspect, self.y * cfg.noise]) + 1.0) * PI;
+        let angle = (perlin.get([self.x * cfg.noise, self.y * cfg.noise]) + 2.0) * PI; // 1.0 or 2.0
+        let aspect = cfg.width as f64 / cfg.height as f64;
 
-        let new_x = self.x + angle.cos() * cfg.step / cfg.aspect;
-        let new_y = self.y + angle.sin() * cfg.step;
+        let dx = angle.cos() * cfg.step / aspect;
+        let dy = angle.sin() * cfg.step;
+
+        let new_x = self.x + dx;
+        let new_y = self.y + dy;
+
+        let wrapped = dx.abs() > 0.5 || dy.abs() > 0.5;
 
         self.prev_x = self.x;
         self.prev_y = self.y;
-        self.x = new_x;
-        self.y = new_y;
+        self.x = wrap(new_x);
+        self.y = wrap(new_y);
+
+        if cfg.line && wrapped {
+            return true;
+        }
 
         if let Some((x1, y1, x2, y2)) = clipper(self.prev_x, self.prev_y, self.x, self.y) {
             draw(img, cfg, x1, y1, x2, y2);
@@ -89,29 +97,47 @@ impl Particle {
     }
 }
 
+fn wrap(v: f64) -> f64 {
+    ((v % 1.0) + 1.0) % 1.0
+}
+
 struct RenderConfig {
     width: u32,
     height: u32,
     step: f64,
     noise: f64,
-    aspect: f64,
     line: bool,
     fg: Rgba<u8>,
+    bg: Rgba<u8>,
 }
 
 fn draw(img: &mut RgbaImage, cfg: &RenderConfig, x1: f64, y1: f64, x2: f64, y2: f64) {
     let (w, h) = (cfg.width as f64, cfg.height as f64);
 
     if cfg.line {
-        draw_antialiased_line_segment_mut(
-            img,
-            ((x1 * w) as i32, (y1 * h) as i32),
-            ((x2 * w) as i32, (y2 * h) as i32),
-            cfg.fg,
-            interpolate,
-        );
+        let x1 = (x1 * w) as i32;
+        let y1 = (y1 * h) as i32;
+        let x2 = (x2 * w) as i32;
+        let y2 = (y2 * h) as i32;
+
+        if x1 >= 0
+            && y1 >= 0
+            && x1 < w as i32
+            && y1 < h as i32
+            && x2 >= 0
+            && y2 >= 0
+            && x2 < w as i32
+            && y2 < h as i32
+        {
+            draw_antialiased_line_segment_mut(img, (x1, y1), (x2, y2), cfg.fg, interpolate);
+        }
     } else {
-        img.put_pixel((x1 * w) as u32, (y1 * h) as u32, cfg.fg);
+        let px = (x1 * w) as i32;
+        let py = (y1 * h) as i32;
+
+        if px >= 0 && py >= 0 && px < w as i32 && py < h as i32 {
+            img.put_pixel(px as u32, py as u32, cfg.fg);
+        }
     }
 }
 
@@ -119,15 +145,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let seed = args.seed.unwrap_or_else(random);
 
-    let bg = parse_rgba(&args.bg_color)?;
+    let render_w = (args.width as f64 * 1.25) as u32;
+    let render_h = (args.height as f64 * 1.25) as u32;
+
     let fg = parse_rgba(&args.fg_color)?;
+    let bg = parse_rgba(&args.bg_color)?;
 
     let output = resolve_output_path(&args)?;
     ensure_parent_exists(&output)?;
-
-    let render_w = (args.width as f64 * 1.25) as u32;
-    let render_h = (args.height as f64 * 1.25) as u32;
-    let aspect = render_w as f64 / render_h as f64;
 
     let mut img = RgbaImage::from_pixel(render_w, render_h, bg);
     let perlin = Perlin::new(seed);
@@ -137,9 +162,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         height: render_h,
         step: args.step_size,
         noise: args.noise,
-        aspect,
         line: args.line,
         fg,
+        bg,
     };
 
     if args.video {
@@ -162,15 +187,16 @@ fn render_image(
     for _ in 0..args.particles {
         let mut p = Particle::new();
         for _ in 0..args.steps {
-            if !p.step(perlin, img, cfg) {
-                break;
-            }
+            p.step(perlin, img, cfg);
         }
     }
 
-    let img = crop_center(img, args.width, args.height);
-    let img = image::imageops::blur(&img, args.blur);
-    img.save(path)?;
+    let frame_img = {
+        let cropped = crop_center(img, args.width, args.height);
+        image::imageops::blur(&cropped, args.blur)
+    };
+
+    frame_img.save(path)?;
 
     Ok(())
 }
@@ -182,63 +208,133 @@ fn render_video(
     perlin: &Perlin,
     cfg: &RenderConfig,
 ) -> Result<(), Box<dyn Error>> {
-    video_rs::init()?;
+    ffmpeg::init()?;
 
-    let w = args.width & !15;
-    let h = args.height & !15;
+    let mut output = ffmpeg::format::output(path.to_str().ok_or("Invalid output path")?)?;
+    let codec =
+        ffmpeg::codec::encoder::find(ffmpeg::codec::Id::H264).ok_or(ffmpeg::Error::InvalidData)?;
 
-    let settings = Settings::preset_h264_yuv420p(w as usize, h as usize, false);
-    println!("{}", path.to_string_lossy());
-    let mut encoder = Encoder::new(path, settings)?;
+    let mut encoder = ffmpeg::codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+
+    encoder.set_width(args.width);
+    encoder.set_height(args.height);
+    encoder.set_format(ffmpeg::format::Pixel::YUV420P);
+    encoder.set_frame_rate(Some(ffmpeg::Rational(60, 1)));
+    encoder.set_time_base(ffmpeg::Rational(1, 60));
+    encoder.set_max_b_frames(0);
+    encoder.set_gop(0);
+
+    if output
+        .format()
+        .flags()
+        .contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER)
+    {
+        encoder.set_flags(ffmpeg::codec::flag::Flags::GLOBAL_HEADER);
+    }
+
+    let mut open_encoder = encoder.open()?;
+    let mut stream = output.add_stream(codec)?;
+    stream.set_parameters(&open_encoder);
+    output.write_header()?;
+
+    let stream_index = stream.index();
+    let stream_time_base = stream.time_base();
+
+    let mut scaler = ffmpeg::software::scaling::context::Context::get(
+        ffmpeg::format::Pixel::RGB24,
+        args.width,
+        args.height,
+        ffmpeg::format::Pixel::YUV420P,
+        args.width,
+        args.height,
+        ffmpeg::software::scaling::flag::Flags::BILINEAR,
+    )?;
+
     let mut particles: Vec<_> = (0..args.particles).map(|_| Particle::new()).collect();
 
-    let mut time = Time::zero();
-    let frame_time = Time::from_nth_of_a_second(24);
+    let mut rgb_frame =
+        ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGB24, args.width, args.height);
+    let mut yuv_frame =
+        ffmpeg::frame::Video::new(ffmpeg::format::Pixel::YUV420P, args.width, args.height);
 
-    for _ in 0..args.steps {
+    for pts in 0..args.steps {
+        *img = RgbaImage::from_pixel(cfg.width, cfg.height, cfg.bg);
         for p in &mut particles {
             p.step(perlin, img, cfg);
         }
 
-        let frame = prepare_frame_yuv(img, w, h, args.blur);
-        eprintln!("3) before encode");
-        encoder.encode(&frame, time)?;
-        time = time.aligned_with(frame_time).add();
+        let frame_img =
+            image::imageops::blur(&crop_center(img, args.width, args.height), args.blur);
+
+        rgba_to_rgb_frame(&frame_img, &mut rgb_frame);
+        scaler.run(&rgb_frame, &mut yuv_frame)?;
+        yuv_frame.set_pts(Some(pts as i64));
+
+        open_encoder.send_frame(&yuv_frame)?;
+        write_encoded_packets(
+            &mut open_encoder,
+            &mut output,
+            60,
+            stream_index,
+            stream_time_base,
+        );
     }
 
-    encoder.finish()?;
+    open_encoder.send_eof()?;
+    write_encoded_packets(
+        &mut open_encoder,
+        &mut output,
+        60,
+        stream_index,
+        stream_time_base,
+    );
+
+    output.write_trailer()?;
     Ok(())
+}
+
+fn rgba_to_rgb_frame(src: &RgbaImage, dst: &mut ffmpeg::frame::Video) {
+    let (w, h) = src.dimensions();
+    let w = w as usize;
+    let h = h as usize;
+
+    let src = src.as_raw();
+    let dst_stride = dst.stride(0) as usize;
+    let dst_data = dst.data_mut(0);
+
+    for y in 0..h {
+        let src_row = &src[y * w * 4..(y + 1) * w * 4];
+        let dst_row = &mut dst_data[y * dst_stride..y * dst_stride + w * 3];
+
+        for x in 0..w {
+            let s = x * 4;
+            let d = x * 3;
+            dst_row[d..d + 3].copy_from_slice(&src_row[s..s + 3]);
+        }
+    }
+}
+
+fn write_encoded_packets(
+    encoder: &mut ffmpeg::codec::encoder::video::Encoder,
+    output: &mut ffmpeg::format::context::Output,
+    fps: u32,
+    stream_index: usize,
+    stream_base_time: ffmpeg::Rational,
+) {
+    let base_time = ffmpeg::Rational(1, fps as i32);
+    let mut encoded = ffmpeg::Packet::empty();
+    while encoder.receive_packet(&mut encoded).is_ok() {
+        encoded.set_stream(stream_index);
+        encoded.rescale_ts(base_time, stream_base_time);
+        encoded.write_interleaved(output).unwrap();
+    }
 }
 
 fn crop_center(img: &RgbaImage, w: u32, h: u32) -> RgbaImage {
     let (iw, ih) = img.dimensions();
     image::imageops::crop_imm(img, (iw - w) / 2, (ih - h) / 2, w, h).to_image()
-}
-
-fn prepare_frame_yuv(img: &RgbaImage, w: u32, h: u32, blur: f32) -> Array3<u8> {
-    let cropped = crop_center(&img, w, h);
-    let blurred = image::imageops::blur(&cropped, blur);
-
-    let mut yuv = Array3::<u8>::zeros((h as usize, w as usize, 3));
-
-    for y in 0..h {
-        for x in 0..w {
-            let p = blurred.get_pixel(x, y);
-            // convert RGBA -> YUV
-            let r = p[0] as f32;
-            let g = p[1] as f32;
-            let b = p[2] as f32;
-
-            let y_val = (0.299 * r + 0.587 * g + 0.114 * b).round() as u8;
-            let u_val = (128.0 + (-0.168736 * r - 0.331264 * g + 0.5 * b)).round() as u8;
-            let v_val = (128.0 + (0.5 * r - 0.418688 * g - 0.081312 * b)).round() as u8;
-
-            yuv[[y as usize, x as usize, 0]] = y_val;
-            yuv[[y as usize, x as usize, 1]] = u_val;
-            yuv[[y as usize, x as usize, 2]] = v_val;
-        }
-    }
-    yuv
 }
 
 fn resolve_output_path(args: &Args) -> Result<PathBuf, Box<dyn Error>> {
@@ -300,30 +396,7 @@ fn positive(s: &str) -> Result<f32, String> {
 }
 
 fn clipper(px: f64, py: f64, x: f64, y: f64) -> Option<(f64, f64, f64, f64)> {
-    let (dx, dy) = (x - px, y - py);
-
-    let mut u1: f64 = 0.0;
-    let mut u2: f64 = 1.0;
-
-    for (p, q) in [(-dx, px), (dx, 1.0 - px), (-dy, py), (dy, 1.0 - py)] {
-        if p == 0.0 && q < 0.0 {
-            return None;
-        }
-
-        let t = q / p;
-
-        if p < 0.0 {
-            u1 = u1.max(t);
-        } else if p > 0.0 {
-            u2 = u2.min(t);
-        }
-    }
-
-    if u1 > u2 {
-        None
-    } else {
-        Some((px + u1 * dx, py + u1 * dy, px + u2 * dx, py + u2 * dy))
-    }
+    Some((px, py, x, y))
 }
 
 fn find_free_path(path: &Path) -> PathBuf {
